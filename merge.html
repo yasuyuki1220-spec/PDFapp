@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PDFを結合(無料・登録不要・端末内処理)｜かんたんPDF書類ツール</title>
+<meta name="description" content="複数のPDFを1つにまとめる無料ツール。登録不要、ファイルは端末の外に送信されないので社内書類も安心。スマホ・パソコン対応。">
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<header class="site"></header>
+<main>
+  <h1>PDFを結合する</h1>
+  <p class="lead">複数のPDFを、並べ替えて1つのファイルにまとめます。登録不要・無料。</p>
+
+  <div class="note">ファイルはあなたの端末の中だけで処理され、サーバーには送信されません。社内書類でも安心して使えます。</div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="drop" id="drop"><b>ここにPDFをドロップ、またはタップして選択</b>複数ファイルをまとめて選べます</div>
+    <input type="file" id="file" accept="application/pdf,.pdf" multiple hidden>
+    <ul class="list" id="list"></ul>
+    <div class="row">
+      <button class="btn" id="go" disabled>結合してダウンロード</button>
+      <button class="btn sec" id="clear" disabled>全部消す</button>
+    </div>
+    <div class="status" id="st"></div>
+  </div>
+
+  <div class="ad"></div>
+
+  <h2>使い方</h2>
+  <ol class="steps">
+    <li>PDFを選ぶ(複数OK)。追加した順に並びます。</li>
+    <li>↑↓ボタンで順番を入れ替え、いらないものは「削除」。</li>
+    <li>「結合してダウンロード」を押すと、1つのPDFが保存されます。</li>
+  </ol>
+
+  <h2>よくある質問</h2>
+  <div class="faq">
+    <details><summary>ファイルはどこかに保存されますか?</summary>処理はすべてこのページ内(あなたの端末)で完了します。アップロードはされず、運営側にも届きません。</details>
+    <details><summary>ページ数やファイルサイズの上限は?</summary>決まった上限はありませんが、端末のメモリを使うため、非常に大きなファイルは時間がかかったり失敗したりすることがあります。</details>
+    <details><summary>パスワード付きPDFも結合できますか?</summary>パスワードで保護されたPDFは結合できません。パスワードを外してからお試しください。</details>
+  </div>
+
+  <h2>あわせて使う</h2>
+  <div class="grid">
+    <a class="card tool" href="split.html"><span class="ic">✂️</span><b>PDFを分割・ページ抽出</b><small>必要なページだけ取り出す</small></a>
+    <a class="card tool" href="text.html"><span class="ic">✍️</span><b>PDFに文字を入力</b><small>手書きせずに記入欄へ入力</small></a>
+    <a class="card tool" href="forms.html"><span class="ic">🗂️</span><b>書類を一気に入力</b><small>氏名・住所を全書類に自動入力</small></a>
+  </div>
+</main>
+<footer class="site"></footer>
+
+<script>
+(function () {
+  var files = []; // {name,size,buf}
+  var list = document.getElementById("list"), go = document.getElementById("go"),
+      clr = document.getElementById("clear"), st = document.getElementById("st");
+
+  function render() {
+    list.innerHTML = "";
+    files.forEach(function (f, i) {
+      var li = document.createElement("li");
+      li.innerHTML = '<span class="name"></span><span class="meta"></span>';
+      li.querySelector(".name").textContent = (i + 1) + ". " + f.name;
+      li.querySelector(".meta").textContent = fmtSize(f.size);
+      [["↑", -1], ["↓", 1]].forEach(function (d) {
+        var b = document.createElement("button"); b.textContent = d[0];
+        b.setAttribute("aria-label", d[1] < 0 ? "上へ" : "下へ");
+        b.disabled = (d[1] < 0 && i === 0) || (d[1] > 0 && i === files.length - 1);
+        b.onclick = function () { var j = i + d[1], t = files[i]; files[i] = files[j]; files[j] = t; render(); };
+        li.appendChild(b);
+      });
+      var del = document.createElement("button"); del.textContent = "削除";
+      del.onclick = function () { files.splice(i, 1); render(); };
+      li.appendChild(del);
+      list.appendChild(li);
+    });
+    go.disabled = files.length < 2;
+    clr.disabled = !files.length;
+    if (files.length === 1) setStatus(st, "あと1つ以上PDFを追加してください。");
+    else if (!files.length) setStatus(st, "");
+    else setStatus(st, files.length + "個のファイルを結合します。");
+  }
+
+  bindDrop(document.getElementById("drop"), document.getElementById("file"), function (fs) {
+    var ok = fs.filter(function (f) { return /\.pdf$/i.test(f.name) || f.type === "application/pdf"; });
+    if (ok.length !== fs.length) setStatus(st, "PDF以外のファイルは無視しました。", true);
+    Promise.all(ok.map(function (f) {
+      return readBuf(f).then(function (buf) { files.push({ name: f.name, size: f.size, buf: buf }); });
+    })).then(render).catch(function (e) { setStatus(st, e.message, true); });
+  });
+
+  clr.onclick = function () { files = []; render(); };
+
+  go.onclick = function () {
+    go.disabled = true; setStatus(st, "結合しています…");
+    loadPdfLib().then(function (L) {
+      return L.PDFDocument.create().then(function (out) {
+        var chain = Promise.resolve();
+        files.forEach(function (f) {
+          chain = chain.then(function () {
+            return L.PDFDocument.load(f.buf).then(function (doc) {
+              return out.copyPages(doc, doc.getPageIndices());
+            }).then(function (pages) {
+              pages.forEach(function (p) { out.addPage(p); });
+            }).catch(function (e) {
+              throw new Error("「" + f.name + "」を読み込めませんでした(パスワード付き・破損の可能性があります)。");
+            });
+          });
+        });
+        return chain.then(function () { return out.save(); });
+      });
+    }).then(function (bytes) {
+      downloadBytes(bytes, "結合.pdf");
+      setStatus(st, "完成しました。ダウンロードを確認してください。");
+    }).catch(function (e) {
+      setStatus(st, e.message, true);
+    }).then(function () { go.disabled = files.length < 2; });
+  };
+  render();
+})();
+</script>
+</body>
+</html>

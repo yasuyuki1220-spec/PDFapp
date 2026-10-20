@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PDFに文字を入力(無料・登録不要・端末内処理)｜かんたんPDF書類ツール</title>
+<meta name="description" content="PDFの好きな位置に文字を入力して保存できる無料ツール。手書きの手間をなくして、日本語もそのまま入力。ファイルは端末の外に送信されません。">
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<header class="site"></header>
+<main>
+  <h1>PDFに文字を入力する</h1>
+  <p class="lead">印刷して手書きする代わりに、PDFの上へ直接入力して保存します。日本語OK・登録不要・無料。</p>
+
+  <div class="note">ファイルはあなたの端末の中だけで処理され、サーバーには送信されません。</div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="drop" id="drop"><b>ここにPDFをドロップ、またはタップして選択</b>記入したい書類のPDFを選んでください</div>
+    <input type="file" id="file" accept="application/pdf,.pdf" hidden>
+
+    <div id="work" hidden>
+      <div class="row">
+        <button class="btn sec" id="prev">◀ 前のページ</button>
+        <span id="pg" class="status" style="margin:0"></span>
+        <button class="btn sec" id="next">次のページ ▶</button>
+        <button class="btn" id="add">＋ 文字を置く</button>
+      </div>
+
+      <div id="panel" class="card" style="padding:12px;margin:10px 0" hidden>
+        <label class="f" for="tx" style="margin-top:0">入力する文字(改行できます)</label>
+        <textarea id="tx" rows="2" placeholder="ここに入力"></textarea>
+        <div class="row" style="margin-bottom:0">
+          <label class="f" style="margin:0">大きさ <input type="number" id="sz" min="6" max="72" value="12" style="width:80px"></label>
+          <label class="f" style="margin:0">色 <input type="color" id="col" value="#000000" style="width:48px;height:36px;vertical-align:middle"></label>
+          <button class="btn sec" id="dup">コピー</button>
+          <button class="btn sec" id="del">削除</button>
+        </div>
+      </div>
+
+      <p class="status">文字の枠をドラッグして位置を決めます。タップで選ぶと、上の入力欄で内容・大きさ・色を変えられます。</p>
+      <div id="stageWrap"><div class="stage" id="stage"><canvas id="cv"></canvas></div></div>
+
+      <div class="row">
+        <button class="btn" id="save">保存してダウンロード</button>
+      </div>
+    </div>
+    <div class="status" id="st"></div>
+  </div>
+
+  <div class="ad"></div>
+
+  <h2>使い方</h2>
+  <ol class="steps">
+    <li>記入したい書類のPDFを選びます。</li>
+    <li>「文字を置く」を押して入力し、枠をドラッグして記入欄に合わせます。</li>
+    <li>ページを移動しながら必要な数だけ置き、「保存してダウンロード」を押します。</li>
+  </ol>
+
+  <h2>よくある質問</h2>
+  <div class="faq">
+    <details><summary>保存したPDFの文字は選択・コピーできますか?</summary>入力した文字は画像として貼り付けられるため、文字としての選択・検索はできません。印刷や提出用に見た目どおり残す用途に向いています。</details>
+    <details><summary>日本語は入力できますか?</summary>はい。お使いの端末にある日本語フォントで表示されます。</details>
+    <details><summary>ファイルは外部に送られますか?</summary>送られません。すべてこのページ内(あなたの端末)で処理されます。</details>
+    <details><summary>向きが変わっているページ(回転済み)の位置がずれます</summary>回転が設定されたページでは位置がずれることがあります。その場合は保存後の確認をおすすめします。</details>
+  </div>
+
+  <h2>同じ書類に毎回入力する方へ</h2>
+  <div class="card">
+    <p style="margin-top:0">氏名・住所・日付を何枚もの書類に何度も入力するなら、<b>一度入力した内容を全書類に自動で入れられるツール</b>もあります。</p>
+    <a class="btn" href="forms.html">書類を一気に入力するツールを見る</a>
+  </div>
+</main>
+<footer class="site"></footer>
+
+<script>
+(function () {
+  var st = document.getElementById("st"), work = document.getElementById("work"),
+      stage = document.getElementById("stage"), cv = document.getElementById("cv"),
+      panel = document.getElementById("panel"), tx = document.getElementById("tx"),
+      sz = document.getElementById("sz"), col = document.getElementById("col"), pg = document.getElementById("pg");
+  var FONT = '"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic","Meiryo","Noto Sans JP",sans-serif';
+  var srcBuf = null, srcName = "", pdf = null, total = 0, cur = 0, scale = 1, pageW = 0, pageH = 0;
+  var items = [], selId = null, nextId = 1, rendering = false, pendingRender = false;
+
+  function pageItems() { return items.filter(function (it) { return it.page === cur; }); }
+  function byId(id) { return items.filter(function (it) { return it.id === id; })[0]; }
+
+  function layout(el, it) {
+    el.style.left = it.x * scale + "px";
+    el.style.top = it.y * scale + "px";
+    el.style.fontSize = it.size * scale + "px";
+    el.style.fontFamily = FONT;
+    el.style.color = it.color;
+    el.textContent = it.text || "（入力）";
+    el.style.opacity = it.text ? 1 : 0.55;
+    el.classList.toggle("sel", it.id === selId);
+  }
+
+  function drawOverlay() {
+    Array.prototype.slice.call(stage.querySelectorAll(".ph")).forEach(function (n) { n.remove(); });
+    pageItems().forEach(function (it) {
+      var el = document.createElement("div");
+      el.className = "ph"; el.dataset.id = it.id;
+      layout(el, it);
+      bindDrag(el, it);
+      stage.appendChild(el);
+    });
+  }
+
+  function bindDrag(el, it) {
+    el.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      select(it.id, true);
+      var sx = e.clientX, sy = e.clientY, ox = it.x, oy = it.y;
+      el.setPointerCapture(e.pointerId);
+      function mv(ev) {
+        it.x = Math.max(0, Math.min(pageW - 4, ox + (ev.clientX - sx) / scale));
+        it.y = Math.max(0, Math.min(pageH - 4, oy + (ev.clientY - sy) / scale));
+        layout(el, it);
+      }
+      function up() { el.removeEventListener("pointermove", mv); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up); }
+      el.addEventListener("pointermove", mv); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+    });
+    el.style.touchAction = "none";
+  }
+
+  function select(id, keepFocus) {
+    selId = id;
+    var it = id ? byId(id) : null;
+    panel.hidden = !it;
+    if (it) { tx.value = it.text; sz.value = it.size; col.value = it.color; }
+    Array.prototype.forEach.call(stage.querySelectorAll(".ph"), function (n) {
+      n.classList.toggle("sel", +n.dataset.id === id);
+    });
+    return it;
+  }
+
+  function renderPage() {
+    if (rendering) { pendingRender = true; return; }
+    rendering = true;
+    pdf.getPage(cur + 1).then(function (page) {
+      var base = page.getViewport({ scale: 1 });
+      pageW = base.width; pageH = base.height;
+      var avail = Math.min(document.getElementById("stageWrap").clientWidth || 700, 820);
+      scale = avail / pageW;
+      var vp = page.getViewport({ scale: scale }), dpr = Math.min(window.devicePixelRatio || 1, 2);
+      cv.width = Math.round(vp.width * dpr); cv.height = Math.round(vp.height * dpr);
+      cv.style.width = vp.width + "px"; cv.style.height = vp.height + "px";
+      var ctx = cv.getContext("2d");
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      return page.render({ canvasContext: ctx, viewport: page.getViewport({ scale: scale * dpr }) }).promise;
+    }).then(function () {
+      pg.textContent = (cur + 1) + " / " + total + " ページ";
+      drawOverlay();
+      if (selId && !byId(selId)) select(null);
+    }).catch(function () { setStatus(st, "ページを表示できませんでした。", true); })
+      .then(function () { rendering = false; if (pendingRender) { pendingRender = false; renderPage(); } });
+  }
+
+  function go(n) { if (n < 0 || n >= total) return; cur = n; select(null); renderPage(); }
+
+  function open(f) {
+    setStatus(st, "読み込んでいます…");
+    work.hidden = true; items = []; selId = null; cur = 0;
+    readBuf(f).then(function (buf) {
+      srcBuf = buf; srcName = f.name.replace(/\.pdf$/i, "");
+      return Promise.all([loadPdfJs(), loadPdfLib()]);
+    }).then(function (libs) {
+      return libs[0].getDocument({ data: new Uint8Array(srcBuf.slice(0)) }).promise;
+    }).then(function (p) {
+      pdf = p; total = p.numPages; work.hidden = false; setStatus(st, ""); select(null); renderPage();
+    }).catch(function () { setStatus(st, "このPDFを開けませんでした(パスワード付き・破損の可能性があります)。", true); });
+  }
+
+  bindDrop(document.getElementById("drop"), document.getElementById("file"), function (fs) { open(fs[0]); });
+  document.getElementById("prev").onclick = function () { go(cur - 1); };
+  document.getElementById("next").onclick = function () { go(cur + 1); };
+
+  document.getElementById("add").onclick = function () {
+    var it = { id: nextId++, page: cur, x: pageW * 0.15, y: pageH * 0.15, text: "", size: +sz.value || 12, color: col.value || "#000000" };
+    items.push(it); drawOverlay(); select(it.id); tx.value = ""; tx.focus();
+  };
+  tx.addEventListener("input", function () {
+    var it = byId(selId); if (!it) return; it.text = tx.value;
+    var el = stage.querySelector('.ph[data-id="' + it.id + '"]'); if (el) layout(el, it);
+  });
+  [sz, col].forEach(function (c) {
+    c.addEventListener("input", function () {
+      var it = byId(selId); if (!it) return;
+      it.size = Math.max(6, Math.min(72, +sz.value || 12)); it.color = col.value;
+      var el = stage.querySelector('.ph[data-id="' + it.id + '"]'); if (el) layout(el, it);
+    });
+  });
+  document.getElementById("del").onclick = function () {
+    items = items.filter(function (it) { return it.id !== selId; }); select(null); drawOverlay();
+  };
+  document.getElementById("dup").onclick = function () {
+    var it = byId(selId); if (!it) return;
+    var c = { id: nextId++, page: it.page, x: it.x + 12, y: it.y + 12, text: it.text, size: it.size, color: it.color };
+    items.push(c); drawOverlay(); select(c.id);
+  };
+  window.addEventListener("resize", function () { if (pdf) renderPage(); });
+
+  function hexToRgb(h) {
+    var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h) || [0, "00", "00", "00"];
+    return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+  }
+
+  /* 文字を高解像度の画像にして貼り付ける(日本語フォントの埋め込み不要) */
+  function textPng(it) {
+    var S = 4, lines = it.text.split("\n"), px = it.size * S;
+    var c = document.createElement("canvas"), x = c.getContext("2d");
+    x.font = px + "px " + FONT;
+    var w = 0; lines.forEach(function (l) { w = Math.max(w, x.measureText(l).width); });
+    var lh = px * 1.2;
+    c.width = Math.ceil(w) + 8; c.height = Math.ceil(lh * lines.length) + 8;
+    x = c.getContext("2d"); x.font = px + "px " + FONT; x.fillStyle = it.color; x.textBaseline = "top";
+    lines.forEach(function (l, i) { x.fillText(l, 4, 4 + i * lh); });
+    return { url: c.toDataURL("image/png"), w: c.width / S, h: c.height / S, pad: 4 / S };
+  }
+
+  document.getElementById("save").onclick = function () {
+    var todo = items.filter(function (it) { return it.text.trim(); });
+    if (!todo.length) return setStatus(st, "文字を入力してから保存してください。", true);
+    setStatus(st, "保存用のPDFを作っています…");
+    loadPdfLib().then(function (L) {
+      return L.PDFDocument.load(srcBuf).then(function (doc) {
+        var pages = doc.getPages(), chain = Promise.resolve();
+        todo.forEach(function (it) {
+          chain = chain.then(function () {
+            var t = textPng(it), page = pages[it.page], H = page.getSize().height;
+            return doc.embedPng(t.url).then(function (img) {
+              page.drawImage(img, { x: it.x - t.pad, y: H - it.y - t.h + t.pad, width: t.w, height: t.h });
+            });
+          });
+        });
+        return chain.then(function () { return doc.save(); });
+      });
+    }).then(function (b) {
+      downloadBytes(b, srcName + "_入力済み.pdf");
+      setStatus(st, "保存しました。ダウンロードを確認してください。");
+    }).catch(function (e) { setStatus(st, "保存できませんでした: " + e.message, true); });
+  };
+})();
+</script>
+</body>
+</html>

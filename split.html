@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PDFを分割・ページ抽出(無料・登録不要・端末内処理)｜かんたんPDF書類ツール</title>
+<meta name="description" content="PDFから必要なページだけを取り出す、1ページずつに分ける無料ツール。サムネイルを見ながら選べて、ファイルは端末の外に送信されません。">
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<header class="site"></header>
+<main>
+  <h1>PDFを分割・ページ抽出する</h1>
+  <p class="lead">ページを見ながら、必要なところだけ取り出します。登録不要・無料。</p>
+
+  <div class="note">ファイルはあなたの端末の中だけで処理され、サーバーには送信されません。</div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="drop" id="drop"><b>ここにPDFをドロップ、またはタップして選択</b>1つのPDFを選んでください</div>
+    <input type="file" id="file" accept="application/pdf,.pdf" hidden>
+    <div id="work" hidden>
+      <p class="status" id="info"></p>
+      <label class="f" for="range">ページ番号で選ぶ(例: 1,3-5)</label>
+      <div class="row" style="margin-top:0">
+        <input type="text" id="range" placeholder="1,3-5" style="max-width:240px">
+        <button class="btn sec" id="apply">この指定で選ぶ</button>
+        <button class="btn sec" id="all">全部選ぶ</button>
+        <button class="btn sec" id="none">選択をはずす</button>
+      </div>
+      <div class="thumbs" id="thumbs"></div>
+      <div class="row">
+        <button class="btn" id="one">選んだページを1つのPDFにする</button>
+        <button class="btn sec" id="each">選んだページを1枚ずつ別PDFにする(ZIP)</button>
+      </div>
+    </div>
+    <div class="status" id="st"></div>
+  </div>
+
+  <div class="ad"></div>
+
+  <h2>使い方</h2>
+  <ol class="steps">
+    <li>PDFを選ぶと、ページの一覧が表示されます。</li>
+    <li>残したいページをタップして選びます(番号で指定もできます)。</li>
+    <li>「1つのPDFにする」で取り出し、または「1枚ずつ別PDF」でZIPにまとめて保存します。</li>
+  </ol>
+
+  <h2>よくある質問</h2>
+  <div class="faq">
+    <details><summary>元のファイルは変わりますか?</summary>変わりません。選んだページから新しいPDFが作られ、元のファイルはそのままです。</details>
+    <details><summary>ページの順番を入れ替えて取り出せますか?</summary>取り出したPDFは元の順番になります。順番を変えたいときは、一度取り出してから「結合」ツールで並べ替えてください。</details>
+    <details><summary>パスワード付きPDFは使えますか?</summary>パスワードで保護されたPDFは扱えません。パスワードを外してからお試しください。</details>
+  </div>
+
+  <h2>あわせて使う</h2>
+  <div class="grid">
+    <a class="card tool" href="merge.html"><span class="ic">📎</span><b>PDFを結合</b><small>複数のPDFを1つにまとめる</small></a>
+    <a class="card tool" href="text.html"><span class="ic">✍️</span><b>PDFに文字を入力</b><small>手書きせずに記入欄へ入力</small></a>
+    <a class="card tool" href="forms.html"><span class="ic">🗂️</span><b>書類を一気に入力</b><small>氏名・住所を全書類に自動入力</small></a>
+  </div>
+</main>
+<footer class="site"></footer>
+
+<script>
+(function () {
+  var src = null, srcName = "", total = 0, sel = {};
+  var st = document.getElementById("st"), work = document.getElementById("work"),
+      thumbs = document.getElementById("thumbs"), info = document.getElementById("info");
+
+  function paint() {
+    Array.prototype.forEach.call(thumbs.children, function (lab, i) {
+      lab.classList.toggle("on", !!sel[i]);
+      lab.querySelector("input").checked = !!sel[i];
+    });
+    var n = Object.keys(sel).filter(function (k) { return sel[k]; }).length;
+    info.textContent = srcName + "(全" + total + "ページ)/ 選択中: " + n + "ページ";
+  }
+  function chosen() { return Object.keys(sel).filter(function (k) { return sel[k]; }).map(Number).sort(function (a, b) { return a - b; }); }
+
+  function load(f) {
+    setStatus(st, "読み込んでいます…");
+    work.hidden = true; thumbs.innerHTML = ""; sel = {};
+    readBuf(f).then(function (buf) {
+      src = buf; srcName = f.name.replace(/\.pdf$/i, "");
+      return Promise.all([loadPdfJs(), loadPdfLib()]);
+    }).then(function (libs) {
+      // pdf.js はバッファを使い切るのでコピーを渡す
+      return libs[0].getDocument({ data: new Uint8Array(src.slice(0)) }).promise;
+    }).then(function (pdf) {
+      total = pdf.numPages; work.hidden = false;
+      var chain = Promise.resolve();
+      for (var p = 1; p <= total; p++) (function (p) {
+        var lab = document.createElement("label");
+        lab.innerHTML = '<input type="checkbox" hidden><span class="cv"></span><div>' + p + "</div>";
+        lab.querySelector("input").onchange = function (e) { sel[p - 1] = e.target.checked; paint(); };
+        thumbs.appendChild(lab);
+        chain = chain.then(function () {
+          return pdf.getPage(p).then(function (page) {
+            var vp0 = page.getViewport({ scale: 1 }), sc = 120 / vp0.width, vp = page.getViewport({ scale: sc });
+            var cv = document.createElement("canvas"); cv.width = vp.width; cv.height = vp.height;
+            lab.querySelector(".cv").replaceWith(cv);
+            return page.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+          });
+        });
+      })(p);
+      paint(); setStatus(st, "");
+      return chain;
+    }).catch(function (e) {
+      setStatus(st, "このPDFを開けませんでした(パスワード付き・破損の可能性があります)。", true);
+    });
+  }
+
+  bindDrop(document.getElementById("drop"), document.getElementById("file"), function (fs) { load(fs[0]); });
+
+  document.getElementById("all").onclick = function () { for (var i = 0; i < total; i++) sel[i] = true; paint(); };
+  document.getElementById("none").onclick = function () { sel = {}; paint(); };
+  document.getElementById("apply").onclick = function () {
+    try {
+      var idx = parseRanges(document.getElementById("range").value, total);
+      sel = {}; idx.forEach(function (i) { sel[i] = true; }); paint(); setStatus(st, "");
+    } catch (e) { setStatus(st, e.message, true); }
+  };
+
+  function makeDoc(L, idx) {
+    return L.PDFDocument.load(src).then(function (doc) {
+      return L.PDFDocument.create().then(function (out) {
+        return out.copyPages(doc, idx).then(function (pages) {
+          pages.forEach(function (p) { out.addPage(p); });
+          return out.save();
+        });
+      });
+    });
+  }
+
+  document.getElementById("one").onclick = function () {
+    var idx = chosen(); if (!idx.length) return setStatus(st, "ページを選んでください。", true);
+    setStatus(st, "作成しています…");
+    loadPdfLib().then(function (L) { return makeDoc(L, idx); }).then(function (b) {
+      downloadBytes(b, srcName + "_抽出.pdf"); setStatus(st, "完成しました。ダウンロードを確認してください。");
+    }).catch(function (e) { setStatus(st, e.message, true); });
+  };
+
+  document.getElementById("each").onclick = function () {
+    var idx = chosen(); if (!idx.length) return setStatus(st, "ページを選んでください。", true);
+    setStatus(st, "作成しています…");
+    var L;
+    Promise.all([loadPdfLib(), new Promise(function (res, rej) {
+      if (window.JSZip) return res();
+      var s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+      s.onload = res; s.onerror = function () { rej(new Error("ZIP作成の部品を読み込めませんでした。")); };
+      document.head.appendChild(s);
+    })]).then(function (r) {
+      L = r[0]; var zip = new JSZip(), chain = Promise.resolve();
+      idx.forEach(function (i) {
+        chain = chain.then(function () { return makeDoc(L, [i]); }).then(function (b) {
+          zip.file(srcName + "_" + String(i + 1).padStart(3, "0") + ".pdf", b);
+        });
+      });
+      return chain.then(function () { return zip.generateAsync({ type: "uint8array" }); });
+    }).then(function (z) {
+      var url = URL.createObjectURL(new Blob([z], { type: "application/zip" }));
+      var a = document.createElement("a"); a.href = url; a.download = srcName + "_分割.zip";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+      setStatus(st, "完成しました。ダウンロードを確認してください。");
+    }).catch(function (e) { setStatus(st, e.message, true); });
+  };
+})();
+</script>
+</body>
+</html>
